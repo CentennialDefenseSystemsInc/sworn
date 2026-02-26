@@ -29,7 +29,7 @@ CONFIG_TEMPLATE = """\
 # Docs: https://sworncode.dev/docs/config
 
 [sworn]
-version = "0.1"
+version = "0.3"
 
 [security]
 # Regex patterns for sensitive paths. Commits touching these are BLOCKED.

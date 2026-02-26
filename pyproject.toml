@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sworncode"
-version = "0.1.0"
+version = "0.3.0"
 description = "Deterministic, fail-closed AI code governance. Every commit is sworn."
 readme = "README.md"
 license = "Apache-2.0"

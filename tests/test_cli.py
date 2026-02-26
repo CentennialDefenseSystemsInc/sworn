@@ -54,7 +54,7 @@ class TestCLI:
         with pytest.raises(SystemExit, match="0"):
             main(["--version"])
         captured = capsys.readouterr()
-        assert "0.1.0" in captured.out
+        assert "0.3.0" in captured.out
 
     def test_no_command_shows_help(self, capsys):
         result = main([])
