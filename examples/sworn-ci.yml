@@ -1,0 +1,12 @@
+# Example: Sworn Gate CI workflow
+# Copy to .github/workflows/sworn-ci.yml in your repo
+name: Sworn Gate
+on: [pull_request]
+jobs:
+  sworn:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: CentennialDefenseSystemsInc/sworn@v0.3

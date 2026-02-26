@@ -1,0 +1,26 @@
+name: "Sworn Gate"
+description: "Run sworn check against PR diff files"
+inputs:
+  version:
+    description: "sworncode version to install"
+    default: "latest"
+  python-version:
+    description: "Python version"
+    default: "3.12"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - shell: bash
+      run: |
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          pip install sworncode
+        else
+          pip install sworncode==${{ inputs.version }}
+        fi
+    - shell: bash
+      env:
+        SWORN_CI: "1"
+      run: sworn ci-check

@@ -207,21 +207,25 @@ def _get_pr_diff_files(repo_root: Path, base_ref: str | None = None) -> list[str
     """Get list of files changed in PR diff."""
     if base_ref is None:
         base_ref = os.environ.get("GITHUB_BASE_REF", "main")
-    try:
-        result = subprocess.run(
-            [
-                "git", "diff", "--name-only", "--diff-filter=ACMR",
-                f"origin/{base_ref}...HEAD",
-            ],
-            capture_output=True,
-            text=True,
-            cwd=repo_root,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            return [f for f in result.stdout.strip().split("\n") if f]
-    except Exception:
-        pass
+
+    # Try origin/{base} first (CI), fall back to bare {base} (local)
+    for ref in [f"origin/{base_ref}", base_ref]:
+        try:
+            result = subprocess.run(
+                [
+                    "git", "diff", "--name-only", "--diff-filter=ACMR",
+                    f"{ref}...HEAD",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=repo_root,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                files = [f for f in result.stdout.strip().split("\n") if f]
+                return files
+        except Exception:
+            continue
     return []
 
 
