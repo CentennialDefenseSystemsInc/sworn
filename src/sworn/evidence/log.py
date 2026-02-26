@@ -21,6 +21,7 @@ class EvidenceEntry:
     kernels: list[dict[str, Any]]
     decision: str
     reason: str = ""
+    resolution_trace: dict[str, Any] = field(default_factory=dict)
     prev_hash: str = "genesis"
 
 

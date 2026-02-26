@@ -67,6 +67,14 @@ custom_dir = ".sworn/kernels"
 log_path = ".sworn/evidence.jsonl"
 # SHA256 hash chain for tamper detection.
 hash_chain = true
+
+# [resolution]
+# Precedence rules for kernel conflict resolution.
+# Each rule: if when_pass kernel passed AND overrides_block kernel blocked,
+# the block is removed. Overrides can only REMOVE blocks, never ADD.
+# [[resolution.precedence]]
+# when_pass = "kernel_a"
+# overrides_block = "kernel_b"
 """
 
 
@@ -81,6 +89,7 @@ class SwornConfig:
     custom_kernel_dir: str = ".sworn/kernels"
     evidence_log_path: str = ".sworn/evidence.jsonl"
     evidence_hash_chain: bool = True
+    precedence_rules: list[dict[str, str]] = field(default_factory=list)
 
 
 def _compile_patterns(raw: list[str]) -> list[re.Pattern[str]]:
@@ -155,6 +164,23 @@ def _parse(raw: dict[str, Any]) -> SwornConfig:
 
     evidence = raw.get("evidence", {})
 
+    resolution = raw.get("resolution", {})
+    precedence_raw = resolution.get("precedence", [])
+    if not isinstance(precedence_raw, list):
+        raise ValueError("resolution.precedence must be a list of tables")
+    precedence_rules: list[dict[str, str]] = []
+    for rule in precedence_raw:
+        if not isinstance(rule, dict):
+            raise ValueError("Each precedence rule must be a table")
+        if "when_pass" not in rule or "overrides_block" not in rule:
+            raise ValueError(
+                "Each precedence rule requires 'when_pass' and 'overrides_block'"
+            )
+        precedence_rules.append({
+            "when_pass": str(rule["when_pass"]),
+            "overrides_block": str(rule["overrides_block"]),
+        })
+
     return SwornConfig(
         security_patterns=_compile_patterns(patterns_raw),
         allowlist=allowlist_files,
@@ -163,4 +189,5 @@ def _parse(raw: dict[str, Any]) -> SwornConfig:
         custom_kernel_dir=kernels.get("custom_dir", ".sworn/kernels"),
         evidence_log_path=evidence.get("log_path", ".sworn/evidence.jsonl"),
         evidence_hash_chain=evidence.get("hash_chain", True),
+        precedence_rules=precedence_rules,
     )
