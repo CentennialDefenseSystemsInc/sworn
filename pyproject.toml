@@ -34,8 +34,8 @@ dev = ["pytest>=7.0"]
 
 [project.urls]
 Homepage = "https://sworncode.dev"
-Repository = "https://github.com/centennial-defense/sworn"
-Issues = "https://github.com/centennial-defense/sworn/issues"
+Repository = "https://github.com/CentennialDefenseSystemsInc/sworn"
+Issues = "https://github.com/CentennialDefenseSystemsInc/sworn/issues"
 
 [project.scripts]
 sworn = "sworn.cli:main"
