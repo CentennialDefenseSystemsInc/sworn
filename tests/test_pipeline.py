@@ -1,0 +1,77 @@
+"""Tests for gate pipeline."""
+from __future__ import annotations
+
+from pathlib import Path
+
+from sworn.config import SwornConfig, _compile_patterns
+from sworn.pipeline import run_pipeline
+
+
+def _config(
+    security_patterns: list[str] | None = None,
+    allowlist: list[str] | None = None,
+) -> SwornConfig:
+    patterns = security_patterns or [r"(^|/)(crypto|auth|keys)/"]
+    return SwornConfig(
+        security_patterns=_compile_patterns(patterns),
+        allowlist=allowlist or [],
+        identity_env_vars={},
+        kernels_enabled={"security": True, "allowlist": True, "audit": True},
+        custom_kernel_dir=".sworn/kernels",
+        evidence_log_path=".sworn/evidence.jsonl",
+        evidence_hash_chain=True,
+    )
+
+
+class TestPipeline:
+    def test_full_pass(self, tmp_repo: Path):
+        config = _config()
+        result = run_pipeline(tmp_repo, ["src/main.py"], config)
+        assert result.decision == "PASS"
+        assert result.gate_results["identity"] == "PASS"
+        assert result.gate_results["security"] == "PASS"
+
+    def test_security_block(self, tmp_repo: Path):
+        config = _config()
+        result = run_pipeline(tmp_repo, ["crypto/vault.py"], config)
+        assert result.decision == "BLOCKED"
+        assert result.gate_results["security"] == "BLOCKED"
+
+    def test_allowlist_block(self, tmp_repo: Path):
+        config = _config(allowlist=["src/*"])
+        result = run_pipeline(tmp_repo, ["deploy/prod.yml"], config)
+        assert result.decision == "BLOCKED"
+        assert "allowlist" in result.reason.lower() or result.gate_results.get("allowlist") == "BLOCKED"
+
+    def test_kernel_block(self, tmp_repo: Path):
+        config = _config()
+        result = run_pipeline(tmp_repo, ["auth/login.py"], config)
+        assert result.decision == "BLOCKED"
+
+    def test_evidence_logged_on_pass(self, tmp_repo: Path):
+        config = _config()
+        (tmp_repo / ".sworn").mkdir(exist_ok=True)
+        run_pipeline(tmp_repo, ["src/main.py"], config)
+        log = tmp_repo / ".sworn" / "evidence.jsonl"
+        assert log.exists()
+        assert log.read_text().strip() != ""
+
+    def test_evidence_logged_on_block(self, tmp_repo: Path):
+        config = _config()
+        (tmp_repo / ".sworn").mkdir(exist_ok=True)
+        run_pipeline(tmp_repo, ["crypto/key.py"], config)
+        log = tmp_repo / ".sworn" / "evidence.jsonl"
+        assert log.exists()
+
+    def test_multiple_blocks_report_first(self, tmp_repo: Path):
+        config = _config()
+        result = run_pipeline(
+            tmp_repo, ["crypto/a.py", "auth/b.py"], config
+        )
+        assert result.decision == "BLOCKED"
+        assert "crypto/a.py" in result.reason or "auth/b.py" in result.reason
+
+    def test_empty_file_list_passes(self, tmp_repo: Path):
+        config = _config()
+        result = run_pipeline(tmp_repo, [], config)
+        assert result.decision == "PASS"

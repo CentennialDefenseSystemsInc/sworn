@@ -1,0 +1,283 @@
+"""Sworn CLI — deterministic, fail-closed AI code governance."""
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+from sworn import __version__
+from sworn.config import CONFIG_TEMPLATE, SwornConfig, load_config
+from sworn.evidence.log import read_entries, verify_chain
+from sworn.evidence.report import generate_report
+from sworn.pipeline import run_pipeline
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Main entry point for the sworn CLI."""
+    parser = argparse.ArgumentParser(
+        prog="sworn",
+        description="Deterministic, fail-closed AI code governance.",
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"sworn {__version__}"
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    # init
+    init_p = sub.add_parser("init", help="Initialize sworn in a git repo")
+    init_p.add_argument("--repo-root", type=Path, default=None)
+
+    # check
+    check_p = sub.add_parser("check", help="Run gate pipeline on staged files")
+    check_p.add_argument("--repo-root", type=Path, default=None)
+
+    # report
+    report_p = sub.add_parser("report", help="Generate evidence report")
+    report_p.add_argument("--repo-root", type=Path, default=None)
+    report_p.add_argument("--json", action="store_true")
+    report_p.add_argument("--since", type=str, default=None)
+    report_p.add_argument(
+        "--cmmc",
+        action="store_true",
+        help="CMMC compliance report (requires sworn-cmmc pack)",
+    )
+    report_p.add_argument(
+        "--soc2",
+        action="store_true",
+        help="SOC 2 compliance report (requires sworn-soc2 pack)",
+    )
+
+    # status
+    status_p = sub.add_parser("status", help="Show sworn status")
+    status_p.add_argument("--repo-root", type=Path, default=None)
+
+    # verify
+    verify_p = sub.add_parser("verify", help="Verify evidence chain integrity")
+    verify_p.add_argument("--repo-root", type=Path, default=None)
+
+    args = parser.parse_args(argv)
+
+    if args.command is None:
+        parser.print_help()
+        return 0
+
+    if args.command == "init":
+        return cmd_init(args.repo_root)
+    elif args.command == "check":
+        return cmd_check(args.repo_root)
+    elif args.command == "report":
+        fmt = "json" if args.json else "text"
+        return cmd_report(args.repo_root, fmt, args.since, args.cmmc, args.soc2)
+    elif args.command == "status":
+        return cmd_status(args.repo_root)
+    elif args.command == "verify":
+        return cmd_verify(args.repo_root)
+
+    return 0
+
+
+def _find_repo_root(override: Path | None = None) -> Path:
+    """Find repo root via git or use override."""
+    if override:
+        return override.resolve()
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return Path(result.stdout.strip())
+    except Exception:
+        pass
+    return Path.cwd()
+
+
+def cmd_init(repo_root_override: Path | None) -> int:
+    """Initialize sworn in a git repo."""
+    repo_root = _find_repo_root(repo_root_override)
+    git_dir = repo_root / ".git"
+
+    if not git_dir.exists():
+        print(f"Error: {repo_root} is not a git repository.", file=sys.stderr)
+        return 1
+
+    sworn_dir = repo_root / ".sworn"
+    sworn_dir.mkdir(exist_ok=True)
+
+    # Write config template
+    config_path = sworn_dir / "config.toml"
+    if not config_path.exists():
+        config_path.write_text(CONFIG_TEMPLATE)
+        print(f"  Created {config_path.relative_to(repo_root)}")
+    else:
+        print(f"  Config already exists: {config_path.relative_to(repo_root)}")
+
+    # Install pre-commit hook
+    hook_path = repo_root / ".git" / "hooks" / "pre-commit"
+    hook_line = 'sworn check || exit 1\n'
+
+    if hook_path.exists():
+        content = hook_path.read_text()
+        if "sworn check" not in content:
+            with hook_path.open("a") as f:
+                f.write(f"\n# Sworn gate\n{hook_line}")
+            print("  Appended sworn check to existing pre-commit hook")
+        else:
+            print("  Hook already installed")
+    else:
+        hook_path.parent.mkdir(parents=True, exist_ok=True)
+        hook_path.write_text(f"#!/usr/bin/env bash\n# Sworn gate\n{hook_line}")
+        hook_path.chmod(0o755)
+        print("  Created pre-commit hook")
+
+    print(f"\nSworn initialized in {repo_root}")
+    print("Every commit in this repo is now gated.")
+    return 0
+
+
+def cmd_check(repo_root_override: Path | None) -> int:
+    """Run the gate pipeline on staged files."""
+    repo_root = _find_repo_root(repo_root_override)
+
+    try:
+        config = load_config(repo_root)
+    except ValueError as exc:
+        print(f"Config error: {exc}", file=sys.stderr)
+        return 1
+
+    # Get staged files
+    files = _get_staged_files(repo_root)
+    if not files:
+        return 0  # Nothing staged, nothing to gate
+
+    result = run_pipeline(repo_root, files, config)
+
+    if result.decision == "PASS":
+        print(f"SWORN PASS — {len(files)} file(s) gated")
+        if result.tool:
+            print(f"  Tool: {result.tool}")
+        return 0
+
+    # BLOCKED
+    print(f"SWORN BLOCKED — {result.reason}")
+    print(f"  Actor: {result.actor}")
+    if result.tool:
+        print(f"  Tool: {result.tool}")
+    for gate, status in result.gate_results.items():
+        if status == "BLOCKED":
+            print(f"  Gate: {gate} → BLOCKED")
+    return 1
+
+
+def _get_staged_files(repo_root: Path) -> list[str]:
+    """Get list of staged files via git."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+            capture_output=True,
+            text=True,
+            cwd=repo_root,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return [f for f in result.stdout.strip().split("\n") if f]
+    except Exception:
+        pass
+    return []
+
+
+def cmd_report(
+    repo_root_override: Path | None,
+    output_format: str,
+    since: str | None,
+    cmmc: bool,
+    soc2: bool,
+) -> int:
+    """Generate an evidence report."""
+    repo_root = _find_repo_root(repo_root_override)
+
+    if cmmc:
+        print("CMMC compliance reporting requires the sworn-cmmc pack.")
+        print("See: https://sworncode.dev/packs")
+        return 0
+
+    if soc2:
+        print("SOC 2 compliance reporting requires the sworn-soc2 pack.")
+        print("See: https://sworncode.dev/packs")
+        return 0
+
+    config = load_config(repo_root)
+    log_path = repo_root / config.evidence_log_path
+
+    report = generate_report(log_path, output_format, since)
+    print(report)
+    return 0
+
+
+def cmd_status(repo_root_override: Path | None) -> int:
+    """Show sworn status."""
+    repo_root = _find_repo_root(repo_root_override)
+
+    sworn_dir = repo_root / ".sworn"
+    initialized = sworn_dir.exists()
+
+    print(f"Repo: {repo_root}")
+    print(f"Initialized: {'yes' if initialized else 'no'}")
+
+    if not initialized:
+        print("\nRun 'sworn init' to get started.")
+        return 0
+
+    # Config
+    config_path = sworn_dir / "config.toml"
+    print(f"Config: {'present' if config_path.exists() else 'missing (using defaults)'}")
+
+    # Hook
+    hook_path = repo_root / ".git" / "hooks" / "pre-commit"
+    hook_installed = False
+    if hook_path.exists():
+        hook_installed = "sworn check" in hook_path.read_text()
+    print(f"Hook: {'installed' if hook_installed else 'not installed'}")
+
+    # Evidence
+    try:
+        config = load_config(repo_root)
+        log_path = repo_root / config.evidence_log_path
+        entries = read_entries(log_path)
+        print(f"Evidence entries: {len(entries)}")
+        if entries:
+            last = entries[-1]
+            print(f"Last gate: {last.get('decision', '?')} at {last.get('timestamp', '?')}")
+
+        # Chain
+        valid, msg = verify_chain(log_path)
+        print(f"Chain integrity: {'VALID' if valid else 'BROKEN'}")
+    except Exception:
+        print("Evidence: unable to read")
+
+    # Kernels
+    try:
+        config = load_config(repo_root)
+        enabled = [k for k, v in config.kernels_enabled.items() if v]
+        print(f"Kernels: {', '.join(enabled) if enabled else 'none'}")
+        print(f"Security patterns: {len(config.security_patterns)}")
+        print(f"Allowlist: {len(config.allowlist)} pattern(s)" if config.allowlist else "Allowlist: disabled")
+    except Exception:
+        pass
+
+    return 0
+
+
+def cmd_verify(repo_root_override: Path | None) -> int:
+    """Verify evidence chain integrity."""
+    repo_root = _find_repo_root(repo_root_override)
+    config = load_config(repo_root)
+    log_path = repo_root / config.evidence_log_path
+
+    valid, msg = verify_chain(log_path)
+    print(f"Chain: {'VALID' if valid else 'BROKEN'}")
+    print(f"  {msg}")
+    return 0 if valid else 1
