@@ -53,6 +53,27 @@ def load_builtin_kernels(
 
         kernels.append(("audit", au_evaluate))
 
+    # CMMC kernel pack (group toggle or per-control)
+    cmmc_enabled = enabled.get("cmmc", False)
+    if cmmc_enabled:
+        _cmmc_kernels = [
+            ("cmmc_ac_access", "sworn.kernels.cmmc.ac_access"),
+            ("cmmc_au_records", "sworn.kernels.cmmc.au_records"),
+            ("cmmc_au_traceability", "sworn.kernels.cmmc.au_traceability"),
+            ("cmmc_cm_baseline", "sworn.kernels.cmmc.cm_baseline"),
+            ("cmmc_cm_settings", "sworn.kernels.cmmc.cm_settings"),
+            ("cmmc_cm_access", "sworn.kernels.cmmc.cm_access"),
+            ("cmmc_sc_boundary", "sworn.kernels.cmmc.sc_boundary"),
+            ("cmmc_si_flaw", "sworn.kernels.cmmc.si_flaw"),
+            ("cmmc_evidence_integrity", "sworn.kernels.cmmc.evidence_integrity"),
+        ]
+        for name, module_path in _cmmc_kernels:
+            if not enabled.get(name, True):
+                continue
+            import importlib
+            mod = importlib.import_module(module_path)
+            kernels.append((name, mod.evaluate))
+
     return kernels
 
 

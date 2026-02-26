@@ -74,6 +74,10 @@ def run_pipeline(
         config={
             "security_patterns": config.security_patterns,
             "allowlist": config.allowlist,
+            "evidence_hash_chain": config.evidence_hash_chain,
+            "evidence_log_path": config.evidence_log_path,
+            "kernels_enabled": config.kernels_enabled,
+            "signing_pub_path": config.signing_pub_path,
         },
     )
 

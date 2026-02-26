@@ -62,6 +62,10 @@ audit = true
 # Custom kernel directory (relative to repo root).
 custom_dir = ".sworn/kernels"
 
+# CMMC kernel pack (NIST 800-171 controls).
+# cmmc = true  # enable entire pack
+# cmmc_ac_access = true  # per-control toggle
+
 [evidence]
 # Evidence log path (relative to repo root).
 log_path = ".sworn/evidence.jsonl"
@@ -168,6 +172,15 @@ def _parse(raw: dict[str, Any]) -> SwornConfig:
         "allowlist": kernels.get("allowlist", True),
         "audit": kernels.get("audit", True),
     }
+
+    # CMMC pack: group toggle or per-control
+    cmmc_val = kernels.get("cmmc", False)
+    if isinstance(cmmc_val, dict):
+        kernels_enabled["cmmc"] = True
+        for k, v in cmmc_val.items():
+            kernels_enabled[f"cmmc_{k}"] = bool(v)
+    else:
+        kernels_enabled["cmmc"] = bool(cmmc_val)
 
     evidence = raw.get("evidence", {})
 
