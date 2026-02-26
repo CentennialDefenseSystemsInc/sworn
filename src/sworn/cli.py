@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -40,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     report_p.add_argument(
         "--cmmc",
         action="store_true",
-        help="CMMC compliance report (requires sworn-cmmc pack)",
+        help="CMMC compliance report",
     )
     report_p.add_argument(
         "--soc2",
@@ -55,6 +56,15 @@ def main(argv: list[str] | None = None) -> int:
     # verify
     verify_p = sub.add_parser("verify", help="Verify evidence chain integrity")
     verify_p.add_argument("--repo-root", type=Path, default=None)
+
+    # keygen
+    keygen_p = sub.add_parser("keygen", help="Generate Ed25519 signing keypair")
+    keygen_p.add_argument("--repo-root", type=Path, default=None)
+
+    # ci-check
+    ci_p = sub.add_parser("ci-check", help="Run gate pipeline on PR diff files")
+    ci_p.add_argument("--repo-root", type=Path, default=None)
+    ci_p.add_argument("--base", type=str, default=None)
 
     args = parser.parse_args(argv)
 
@@ -73,6 +83,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_status(args.repo_root)
     elif args.command == "verify":
         return cmd_verify(args.repo_root)
+    elif args.command == "keygen":
+        return cmd_keygen(args.repo_root)
+    elif args.command == "ci-check":
+        return cmd_ci_check(args.repo_root, args.base)
 
     return 0
 
@@ -189,6 +203,56 @@ def _get_staged_files(repo_root: Path) -> list[str]:
     return []
 
 
+def _get_pr_diff_files(repo_root: Path, base_ref: str | None = None) -> list[str]:
+    """Get list of files changed in PR diff."""
+    if base_ref is None:
+        base_ref = os.environ.get("GITHUB_BASE_REF", "main")
+    try:
+        result = subprocess.run(
+            [
+                "git", "diff", "--name-only", "--diff-filter=ACMR",
+                f"origin/{base_ref}...HEAD",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=repo_root,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return [f for f in result.stdout.strip().split("\n") if f]
+    except Exception:
+        pass
+    return []
+
+
+def cmd_ci_check(repo_root_override: Path | None, base_ref: str | None) -> int:
+    """Run the gate pipeline on PR diff files (CI mode)."""
+    repo_root = _find_repo_root(repo_root_override)
+
+    try:
+        config = load_config(repo_root)
+    except ValueError as exc:
+        print(f"Config error: {exc}", file=sys.stderr)
+        return 1
+
+    files = _get_pr_diff_files(repo_root, base_ref)
+    if not files:
+        print("SWORN PASS — no files in diff")
+        return 0
+
+    result = run_pipeline(repo_root, files, config)
+
+    if result.decision == "PASS":
+        print(f"SWORN PASS — {len(files)} file(s) gated (CI)")
+        return 0
+
+    print(f"SWORN BLOCKED — {result.reason}")
+    for gate, status in result.gate_results.items():
+        if status == "BLOCKED":
+            print(f"  Gate: {gate} → BLOCKED")
+    return 1
+
+
 def cmd_report(
     repo_root_override: Path | None,
     output_format: str,
@@ -200,8 +264,11 @@ def cmd_report(
     repo_root = _find_repo_root(repo_root_override)
 
     if cmmc:
-        print("CMMC compliance reporting requires the sworn-cmmc pack.")
-        print("See: https://sworncode.dev/packs")
+        config = load_config(repo_root)
+        log_path = repo_root / config.evidence_log_path
+        from sworn.evidence.cmmc_report import generate_cmmc_report
+        report = generate_cmmc_report(log_path, config, output_format)
+        print(report)
         return 0
 
     if soc2:
@@ -242,6 +309,20 @@ def cmd_status(repo_root_override: Path | None) -> int:
         hook_installed = "sworn check" in hook_path.read_text()
     print(f"Hook: {'installed' if hook_installed else 'not installed'}")
 
+    # Signing
+    try:
+        config = load_config(repo_root)
+        key_path = repo_root / config.signing_key_path
+        pub_path = repo_root / config.signing_pub_path
+        if key_path.exists():
+            print("Signing: enabled (key present)")
+        elif pub_path.exists():
+            print("Signing: verify-only (pub key present)")
+        else:
+            print("Signing: disabled (no key)")
+    except Exception:
+        pass
+
     # Evidence
     try:
         config = load_config(repo_root)
@@ -272,12 +353,61 @@ def cmd_status(repo_root_override: Path | None) -> int:
 
 
 def cmd_verify(repo_root_override: Path | None) -> int:
-    """Verify evidence chain integrity."""
+    """Verify evidence chain integrity and signatures."""
     repo_root = _find_repo_root(repo_root_override)
     config = load_config(repo_root)
     log_path = repo_root / config.evidence_log_path
 
-    valid, msg = verify_chain(log_path)
+    # Load verify key if present
+    verify_key = None
+    pub_path = repo_root / config.signing_pub_path
+    if pub_path.exists():
+        try:
+            from sworn.evidence.signing import load_verify_key
+            verify_key = load_verify_key(pub_path)
+        except Exception as exc:
+            print(f"Warning: could not load verify key: {exc}")
+
+    valid, msg = verify_chain(log_path, verify_key=verify_key)
     print(f"Chain: {'VALID' if valid else 'BROKEN'}")
     print(f"  {msg}")
     return 0 if valid else 1
+
+
+def cmd_keygen(repo_root_override: Path | None) -> int:
+    """Generate Ed25519 signing keypair."""
+    repo_root = _find_repo_root(repo_root_override)
+    sworn_dir = repo_root / ".sworn"
+
+    if not sworn_dir.exists():
+        print("Error: run 'sworn init' first", file=sys.stderr)
+        return 1
+
+    try:
+        from sworn.evidence.signing import generate_keypair
+    except Exception:
+        print("Error: PyNaCl required: pip install 'sworncode[signing]'", file=sys.stderr)
+        return 1
+
+    config = load_config(repo_root)
+    key_dir = (repo_root / config.signing_key_path).parent
+
+    try:
+        priv_path, pub_path = generate_keypair(key_dir)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"  Created {priv_path.relative_to(repo_root)} (private — DO NOT COMMIT)")
+    print(f"  Created {pub_path.relative_to(repo_root)} (public — safe to commit)")
+
+    # Warn about .gitignore
+    gitignore = repo_root / ".gitignore"
+    if gitignore.exists():
+        content = gitignore.read_text()
+        if "signing.key" not in content:
+            print("\n  WARNING: Add 'signing.key' to .gitignore")
+    else:
+        print("\n  WARNING: No .gitignore found. Add 'signing.key' to prevent key leak.")
+
+    return 0

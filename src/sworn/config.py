@@ -68,6 +68,11 @@ log_path = ".sworn/evidence.jsonl"
 # SHA256 hash chain for tamper detection.
 hash_chain = true
 
+# [signing]
+# Ed25519 evidence signing. Generate keys with: sworn keygen
+# key_path = ".sworn/signing.key"
+# pub_path = ".sworn/signing.pub"
+
 # [resolution]
 # Precedence rules for kernel conflict resolution.
 # Each rule: if when_pass kernel passed AND overrides_block kernel blocked,
@@ -89,6 +94,8 @@ class SwornConfig:
     custom_kernel_dir: str = ".sworn/kernels"
     evidence_log_path: str = ".sworn/evidence.jsonl"
     evidence_hash_chain: bool = True
+    signing_key_path: str = ".sworn/signing.key"
+    signing_pub_path: str = ".sworn/signing.pub"
     precedence_rules: list[dict[str, str]] = field(default_factory=list)
 
 
@@ -164,6 +171,10 @@ def _parse(raw: dict[str, Any]) -> SwornConfig:
 
     evidence = raw.get("evidence", {})
 
+    signing = raw.get("signing", {})
+    signing_key_path = signing.get("key_path", ".sworn/signing.key")
+    signing_pub_path = signing.get("pub_path", ".sworn/signing.pub")
+
     resolution = raw.get("resolution", {})
     precedence_raw = resolution.get("precedence", [])
     if not isinstance(precedence_raw, list):
@@ -189,5 +200,7 @@ def _parse(raw: dict[str, Any]) -> SwornConfig:
         custom_kernel_dir=kernels.get("custom_dir", ".sworn/kernels"),
         evidence_log_path=evidence.get("log_path", ".sworn/evidence.jsonl"),
         evidence_hash_chain=evidence.get("hash_chain", True),
+        signing_key_path=signing_key_path,
+        signing_pub_path=signing_pub_path,
         precedence_rules=precedence_rules,
     )

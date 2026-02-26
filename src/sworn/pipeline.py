@@ -124,7 +124,27 @@ def run_pipeline(
         "BLOCKED" if trace.final_decision == "BLOCKED" else "PASS"
     )
 
-    # 5. Evidence (always log, even on block)
+    # 5. Load signing key if present (fail-closed)
+    signing_key = None
+    key_path = repo_root / config.signing_key_path
+    if key_path.exists():
+        from sworn.evidence.signing import (
+            SigningError,
+            SigningUnavailableError,
+            load_signing_key,
+        )
+        try:
+            signing_key = load_signing_key(key_path)
+        except SigningUnavailableError:
+            decision = "BLOCKED"
+            reason = "Signing key exists but PyNaCl is not installed"
+            gate_results["signing"] = "ERROR"
+        except SigningError as exc:
+            decision = "BLOCKED"
+            reason = f"Signing key error: {exc}"
+            gate_results["signing"] = "ERROR"
+
+    # 6. Evidence (always log, even on block)
     evidence_entry = EvidenceEntry(
         timestamp=_now(),
         actor=identity.actor,
@@ -139,7 +159,10 @@ def run_pipeline(
 
     log_path = repo_root / config.evidence_log_path
     try:
-        append_entry(log_path, evidence_entry, config.evidence_hash_chain)
+        append_entry(
+            log_path, evidence_entry, config.evidence_hash_chain,
+            signing_key=signing_key,
+        )
         gate_results["evidence"] = "PASS"
     except Exception:
         gate_results["evidence"] = "ERROR"

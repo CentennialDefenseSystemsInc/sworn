@@ -95,3 +95,130 @@ class TestEvidenceLog:
             assert False, "Should have raised"
         except (NotADirectoryError, OSError):
             pass  # Expected — fail-closed behavior tested via pipeline
+
+    def test_signed_entry_has_signature(self, tmp_path: Path, signing_keypair):
+        sk, vk, _ = signing_keypair
+        log = tmp_path / "evidence.jsonl"
+        entry = EvidenceEntry(
+            timestamp="2026-01-01T00:00:00Z",
+            actor="test",
+            tool=None,
+            files=["a.py"],
+            gates={"identity": "PASS"},
+            kernels=[],
+            decision="PASS",
+        )
+        append_entry(log, entry, hash_chain=True, signing_key=sk)
+        entries = read_entries(log)
+        assert len(entries) == 1
+        assert entries[0]["signature"] != ""
+
+    def test_unsigned_entry_no_signature(self, tmp_path: Path):
+        log = tmp_path / "evidence.jsonl"
+        entry = EvidenceEntry(
+            timestamp="2026-01-01T00:00:00Z",
+            actor="test",
+            tool=None,
+            files=["a.py"],
+            gates={"identity": "PASS"},
+            kernels=[],
+            decision="PASS",
+        )
+        append_entry(log, entry, hash_chain=True)
+        entries = read_entries(log)
+        assert entries[0]["signature"] == ""
+
+    def test_signed_chain_valid(self, tmp_path: Path, signing_keypair):
+        sk, vk, _ = signing_keypair
+        log = tmp_path / "evidence.jsonl"
+        for i in range(3):
+            entry = EvidenceEntry(
+                timestamp=f"2026-01-0{i+1}T00:00:00Z",
+                actor="test",
+                tool=None,
+                files=[f"file{i}.py"],
+                gates={"identity": "PASS"},
+                kernels=[],
+                decision="PASS",
+            )
+            append_entry(log, entry, hash_chain=True, signing_key=sk)
+
+        valid, msg = verify_chain(log, verify_key=vk)
+        assert valid, msg
+        assert "signed" in msg.lower()
+
+    def test_signed_chain_tampered_detected(self, tmp_path: Path, signing_keypair):
+        sk, vk, _ = signing_keypair
+        log = tmp_path / "evidence.jsonl"
+        for i in range(3):
+            entry = EvidenceEntry(
+                timestamp=f"2026-01-0{i+1}T00:00:00Z",
+                actor="test",
+                tool=None,
+                files=[f"file{i}.py"],
+                gates={"identity": "PASS"},
+                kernels=[],
+                decision="PASS",
+            )
+            append_entry(log, entry, hash_chain=True, signing_key=sk)
+
+        # Tamper with entry data but keep signature
+        lines = log.read_text().splitlines()
+        entry_data = json.loads(lines[1])
+        entry_data["actor"] = "tampered"
+        lines[1] = json.dumps(entry_data, separators=(",", ":"), sort_keys=True)
+        log.write_text("\n".join(lines) + "\n")
+
+        valid, msg = verify_chain(log, verify_key=vk)
+        assert not valid
+
+    def test_unsigned_chain_still_valid_without_pubkey(self, tmp_path: Path):
+        """Backward compat: unsigned entries verified normally without verify_key."""
+        log = tmp_path / "evidence.jsonl"
+        for i in range(2):
+            entry = EvidenceEntry(
+                timestamp=f"2026-01-0{i+1}T00:00:00Z",
+                actor="test",
+                tool=None,
+                files=[f"f{i}.py"],
+                gates={"identity": "PASS"},
+                kernels=[],
+                decision="PASS",
+            )
+            append_entry(log, entry, hash_chain=True)
+
+        valid, msg = verify_chain(log)
+        assert valid
+
+    def test_mixed_signed_unsigned_with_pubkey(self, tmp_path: Path, signing_keypair):
+        """Unsigned entry after signed entries breaks when verifying with pubkey."""
+        sk, vk, _ = signing_keypair
+        log = tmp_path / "evidence.jsonl"
+
+        # First entry: signed
+        entry1 = EvidenceEntry(
+            timestamp="2026-01-01T00:00:00Z",
+            actor="test",
+            tool=None,
+            files=["a.py"],
+            gates={"identity": "PASS"},
+            kernels=[],
+            decision="PASS",
+        )
+        append_entry(log, entry1, hash_chain=True, signing_key=sk)
+
+        # Second entry: unsigned
+        entry2 = EvidenceEntry(
+            timestamp="2026-01-02T00:00:00Z",
+            actor="test",
+            tool=None,
+            files=["b.py"],
+            gates={"identity": "PASS"},
+            kernels=[],
+            decision="PASS",
+        )
+        append_entry(log, entry2, hash_chain=True)
+
+        valid, msg = verify_chain(log, verify_key=vk)
+        assert not valid
+        assert "missing signature" in msg.lower()

@@ -1,4 +1,4 @@
-"""Evidence log — append-only JSONL with optional SHA256 hash chain."""
+"""Evidence log — append-only JSONL with optional SHA256 hash chain and Ed25519 signing."""
 from __future__ import annotations
 
 import hashlib
@@ -23,6 +23,7 @@ class EvidenceEntry:
     reason: str = ""
     resolution_trace: dict[str, Any] = field(default_factory=dict)
     prev_hash: str = "genesis"
+    signature: str = ""
 
 
 def _now() -> str:
@@ -31,6 +32,16 @@ def _now() -> str:
 
 def _hash_entry(entry_json: str) -> str:
     return hashlib.sha256(entry_json.encode()).hexdigest()
+
+
+def _canonical_json(entry_dict: dict[str, Any]) -> str:
+    """Produce canonical JSON for hashing and signing.
+
+    The signature field is always empty in the canonical form.
+    """
+    canonical = dict(entry_dict)
+    canonical["signature"] = ""
+    return json.dumps(canonical, separators=(",", ":"), sort_keys=True)
 
 
 def read_last_hash(log_path: Path) -> str:
@@ -46,7 +57,9 @@ def read_last_hash(log_path: Path) -> str:
                     last_line = line
             if not last_line:
                 return "genesis"
-            return _hash_entry(last_line)
+            # Hash the canonical form (signature stripped)
+            entry = json.loads(last_line)
+            return _hash_entry(_canonical_json(entry))
     except Exception:
         return "genesis"
 
@@ -55,12 +68,27 @@ def append_entry(
     log_path: Path,
     entry: EvidenceEntry,
     hash_chain: bool = True,
+    signing_key: Any = None,
 ) -> None:
-    """Append an evidence entry to the JSONL log."""
+    """Append an evidence entry to the JSONL log.
+
+    If signing_key is provided, sign the canonical JSON.
+    Hash chain is computed on canonical JSON (signature="").
+    """
     if hash_chain:
         entry.prev_hash = read_last_hash(log_path)
 
+    entry.signature = ""
     entry_dict = asdict(entry)
+    canonical = _canonical_json(entry_dict)
+
+    # Sign if key provided
+    if signing_key is not None:
+        from sworn.evidence.signing import sign_entry
+        entry_dict["signature"] = sign_entry(signing_key, canonical)
+    else:
+        entry_dict["signature"] = ""
+
     entry_json = json.dumps(entry_dict, separators=(",", ":"), sort_keys=True)
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,13 +113,22 @@ def read_entries(log_path: Path) -> list[dict[str, Any]]:
     return entries
 
 
-def verify_chain(log_path: Path) -> tuple[bool, str]:
-    """Verify the hash chain integrity. Returns (valid, message)."""
+def verify_chain(
+    log_path: Path,
+    verify_key: Any = None,
+) -> tuple[bool, str]:
+    """Verify the hash chain integrity and optional signatures.
+
+    Returns (valid, message).
+    If verify_key is provided, also verifies Ed25519 signatures.
+    """
     if not log_path.exists():
         return True, "No evidence log found"
 
     prev_hash = "genesis"
     line_num = 0
+    signed_count = 0
+    unsigned_count = 0
 
     with log_path.open("r") as f:
         for line in f:
@@ -105,6 +142,8 @@ def verify_chain(log_path: Path) -> tuple[bool, str]:
             except json.JSONDecodeError:
                 return False, f"Line {line_num}: invalid JSON"
 
+            # Verify hash chain on canonical form
+            canonical = _canonical_json(entry)
             stored_hash = entry.get("prev_hash", "")
             if stored_hash != prev_hash:
                 return False, (
@@ -112,6 +151,28 @@ def verify_chain(log_path: Path) -> tuple[bool, str]:
                     f"(expected {prev_hash[:16]}..., got {stored_hash[:16]}...)"
                 )
 
-            prev_hash = _hash_entry(line)
+            prev_hash = _hash_entry(canonical)
 
-    return True, f"Chain valid: {line_num} entries"
+            # Verify signature if verify_key provided
+            sig = entry.get("signature", "")
+            if sig:
+                signed_count += 1
+                if verify_key is not None:
+                    from sworn.evidence.signing import verify_signature
+                    if not verify_signature(verify_key, canonical, sig):
+                        return False, f"Line {line_num}: signature verification failed"
+            else:
+                unsigned_count += 1
+                if verify_key is not None and line_num > 0:
+                    # In a signed log, unsigned entries are a break
+                    if signed_count > 0:
+                        return False, f"Line {line_num}: missing signature in signed log"
+
+    msg = f"Chain valid: {line_num} entries"
+    if signed_count > 0:
+        msg += f" ({signed_count} signed"
+        if unsigned_count > 0:
+            msg += f", {unsigned_count} unsigned"
+        msg += ")"
+
+    return True, msg

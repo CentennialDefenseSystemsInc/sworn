@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -83,3 +84,20 @@ def sample_evidence(tmp_repo: Path) -> Path:
             f.write(line + "\n")
 
     return log_path
+
+
+@pytest.fixture
+def signing_keypair(tmp_path: Path) -> tuple[Any, Any, Path]:
+    """Generate a signing keypair and return (signing_key, verify_key, key_dir)."""
+    from sworn.evidence.signing import (
+        generate_keypair,
+        load_signing_key,
+        load_verify_key,
+    )
+
+    key_dir = tmp_path / ".sworn"
+    key_dir.mkdir(exist_ok=True)
+    priv_path, pub_path = generate_keypair(key_dir)
+    sk = load_signing_key(priv_path)
+    vk = load_verify_key(pub_path)
+    return sk, vk, key_dir
