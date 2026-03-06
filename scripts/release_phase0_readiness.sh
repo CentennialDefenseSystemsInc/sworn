@@ -41,20 +41,24 @@ VENV_PY=""
 VENV_SWORN=""
 
 resolve_runner() {
-  if [[ -n "$RUNNER_BIN" ]]; then
-    return
+  if [[ -z "$RUNNER_BIN" ]]; then
+    local candidate
+    for candidate in python3.12 python3.13 python3.11 python3.10; do
+      if command -v "$candidate" >/dev/null 2>&1; then
+        RUNNER_BIN="$candidate"
+        break
+      fi
+    done
   fi
 
-  local candidate
-  for candidate in python3.12 python3.13 python3.11 python3.10; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-      RUNNER_BIN="$candidate"
-      return
-    fi
-  done
+  if [[ -z "$RUNNER_BIN" ]]; then
+    echo "FAIL: supported Python 3.10-3.13 not found | phase0 | pass --python explicitly"
+    exit 1
+  fi
 
-  echo "FAIL: supported Python 3.10-3.13 not found | phase0 | pass --python explicitly"
-  exit 1
+  if [[ "$RUNNER_BIN" != */* ]]; then
+    RUNNER_BIN="$(command -v "$RUNNER_BIN")"
+  fi
 }
 
 validate_runner_version() {
