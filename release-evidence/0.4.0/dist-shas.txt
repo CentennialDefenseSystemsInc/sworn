@@ -1,2 +1,2 @@
-6de3183da303086e098320e47141ee9a12cc47bec2496f4751c4f130de954ea2  dist/sworncode-0.4.0.tar.gz
-f020dd6eb150c3c7448bd6efd80e1cb6ef62da3e8ee4407fb3615858a488402b  dist/sworncode-0.4.0-py3-none-any.whl
+0172f9d4db2b06ab338f7a54e5c11434e77ac7123ad30439445d9dd489b24f78  dist/sworncode-0.4.0.tar.gz
+0f5357f112b33cd585b516b309d9abc136e7a105f7e7dc43dd1ec572cba33fa7  dist/sworncode-0.4.0-py3-none-any.whl

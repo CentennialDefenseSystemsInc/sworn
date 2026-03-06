@@ -4,9 +4,9 @@ Manifest Type: Phase-0 pre-tag evidence
 Release Tag: pending phase1
 Tag SHA: pending phase1
 PyPI Publish Ref: pending phase1
-Build Date (UTC): 2026-03-06T22:35:11Z
+Build Date (UTC): 2026-03-06T22:38:08Z
 Maintainer: pending phase1
-Phase-0 Start Commit: c0158bad2c5421b549f8507aaf2a7a4a5d4ca979
+Phase-0 Start Commit: aa8791001db8b4d42ef74c6fc473451584a89a80
 Phase-0 Branch: main
 
 Evidence Artifacts

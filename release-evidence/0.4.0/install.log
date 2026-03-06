@@ -10,7 +10,7 @@ Collecting pytest>=7.0 (from sworncode==0.4.0)
 Collecting pynacl>=1.5.0 (from sworncode==0.4.0)
   Using cached pynacl-1.6.2-cp38-abi3-macosx_10_10_universal2.whl.metadata (10.0 kB)
 Collecting cffi>=2.0.0 (from pynacl>=1.5.0->sworncode==0.4.0)
-  Downloading cffi-2.0.0-cp312-cp312-macosx_11_0_arm64.whl.metadata (2.6 kB)
+  Using cached cffi-2.0.0-cp312-cp312-macosx_11_0_arm64.whl.metadata (2.6 kB)
 Collecting pycparser (from cffi>=2.0.0->pynacl>=1.5.0->sworncode==0.4.0)
   Using cached pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
 Collecting iniconfig>=1.0.1 (from pytest>=7.0->sworncode==0.4.0)
@@ -20,7 +20,7 @@ Collecting pluggy<2,>=1.5 (from pytest>=7.0->sworncode==0.4.0)
   Using cached pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
 Requirement already satisfied: pygments>=2.7.2 in ./.venv-release/lib/python3.12/site-packages (from pytest>=7.0->sworncode==0.4.0) (2.19.2)
 Using cached pynacl-1.6.2-cp38-abi3-macosx_10_10_universal2.whl (388 kB)
-Downloading cffi-2.0.0-cp312-cp312-macosx_11_0_arm64.whl (181 kB)
+Using cached cffi-2.0.0-cp312-cp312-macosx_11_0_arm64.whl (181 kB)
 Using cached pytest-9.0.2-py3-none-any.whl (374 kB)
 Using cached pluggy-1.6.0-py3-none-any.whl (20 kB)
 Using cached iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
@@ -28,8 +28,8 @@ Using cached pycparser-3.0-py3-none-any.whl (48 kB)
 Building wheels for collected packages: sworncode
   Building wheel for sworncode (pyproject.toml): started
   Building wheel for sworncode (pyproject.toml): finished with status 'done'
-  Created wheel for sworncode: filename=sworncode-0.4.0-py3-none-any.whl size=39408 sha256=3523ee02ac6db34a73cc894c58c3bd50a0682671bc64ca64fd515465294fa152
-  Stored in directory: /private/var/folders/dc/m9w905bd0gl9376h5_vm_b3m0000gn/T/pip-ephem-wheel-cache-hx7m1fbt/wheels/c7/80/d0/0e5a25bd78fd21f520688e996c2409966ab0a078f5426d2742
+  Created wheel for sworncode: filename=sworncode-0.4.0-py3-none-any.whl size=39408 sha256=24e2e481c635715e2b3692560a596d1e0fd377f86121f213a84f10652bcf05bf
+  Stored in directory: /private/var/folders/dc/m9w905bd0gl9376h5_vm_b3m0000gn/T/pip-ephem-wheel-cache-y4cv9p9x/wheels/c7/80/d0/0e5a25bd78fd21f520688e996c2409966ab0a078f5426d2742
 Successfully built sworncode
 Installing collected packages: sworncode, pycparser, pluggy, iniconfig, pytest, cffi, pynacl
 
