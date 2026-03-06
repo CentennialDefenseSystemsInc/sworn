@@ -205,11 +205,33 @@ def _get_staged_files(repo_root: Path) -> list[str]:
 
 def _get_pr_diff_files(repo_root: Path, base_ref: str | None = None) -> list[str]:
     """Get list of files changed in PR diff."""
+    ci_mode = os.environ.get("SWORN_CI") == "1"
     if base_ref is None:
-        base_ref = os.environ.get("GITHUB_BASE_REF", "main")
+        base_ref = os.environ.get("SWORN_BASE_SHA")
+        if not base_ref:
+            base_ref = os.environ.get("GITHUB_BASE_REF", "main")
 
-    # Try origin/{base} first (CI), fall back to bare {base} (local)
-    for ref in [f"origin/{base_ref}", base_ref]:
+    if ci_mode:
+        if not base_ref:
+            raise RuntimeError(
+                "CI mode requires base ref: pass --base or set SWORN_BASE_SHA"
+            )
+        if not (
+            len(base_ref) == 40
+            and all(c in "0123456789abcdefABCDEF" for c in base_ref)
+        ):
+            raise RuntimeError(
+                "CI mode requires full base SHA (40 hex chars) "
+                "from github.event.pull_request.base.sha"
+            )
+
+    if len(base_ref) == 40 and all(c in "0123456789abcdefABCDEF" for c in base_ref):
+        refs = [base_ref]
+    else:
+        # Try origin/{base} first (CI), fall back to bare {base} (local)
+        refs = [f"origin/{base_ref}", base_ref]
+
+    for ref in refs:
         try:
             result = subprocess.run(
                 [
@@ -226,6 +248,13 @@ def _get_pr_diff_files(repo_root: Path, base_ref: str | None = None) -> list[str
                 return files
         except Exception:
             continue
+
+    if ci_mode:
+        raise RuntimeError(
+            "Failed to compute CI diff. Ensure actions/checkout uses "
+            "fetch-depth: 0 and the base SHA is available."
+        )
+
     return []
 
 
@@ -239,7 +268,11 @@ def cmd_ci_check(repo_root_override: Path | None, base_ref: str | None) -> int:
         print(f"Config error: {exc}", file=sys.stderr)
         return 1
 
-    files = _get_pr_diff_files(repo_root, base_ref)
+    try:
+        files = _get_pr_diff_files(repo_root, base_ref)
+    except RuntimeError as exc:
+        print(f"SWORN BLOCKED — {exc}", file=sys.stderr)
+        return 1
     if not files:
         print("SWORN PASS — no files in diff")
         return 0
@@ -320,6 +353,11 @@ def cmd_status(repo_root_override: Path | None) -> int:
         pub_path = repo_root / config.signing_pub_path
         if key_path.exists():
             print("Signing: enabled (key present)")
+        elif pub_path.exists() and pub_path.is_dir():
+            if any(p.suffix == ".pub" for p in pub_path.iterdir()):
+                print("Signing: verify-only (pub key(s) present)")
+            else:
+                print("Signing: disabled (no key)")
         elif pub_path.exists():
             print("Signing: verify-only (pub key present)")
         else:
@@ -368,11 +406,17 @@ def cmd_verify(repo_root_override: Path | None) -> int:
     if pub_path.exists():
         try:
             from sworn.evidence.signing import load_verify_key
-            verify_key = load_verify_key(pub_path)
+            if pub_path.is_dir():
+                valid, msg = verify_chain(log_path, verify_key_dir=pub_path)
+            else:
+                verify_key = load_verify_key(pub_path)
+                valid, msg = verify_chain(log_path, verify_key=verify_key)
         except Exception as exc:
             print(f"Warning: could not load verify key: {exc}")
-
-    valid, msg = verify_chain(log_path, verify_key=verify_key)
+            valid = False
+            msg = f"failed to verify signatures: {exc}"
+    else:
+        valid, msg = verify_chain(log_path)
     print(f"Chain: {'VALID' if valid else 'BROKEN'}")
     print(f"  {msg}")
     return 0 if valid else 1
@@ -409,9 +453,11 @@ def cmd_keygen(repo_root_override: Path | None) -> int:
     gitignore = repo_root / ".gitignore"
     if gitignore.exists():
         content = gitignore.read_text()
-        if "signing.key" not in content:
-            print("\n  WARNING: Add 'signing.key' to .gitignore")
+        if "active.key" not in content:
+            print("\n  WARNING: Add 'active.key' to .gitignore")
     else:
-        print("\n  WARNING: No .gitignore found. Add 'signing.key' to prevent key leak.")
+        print(
+            "\n  WARNING: No .gitignore found. Add 'active.key' to prevent key leak."
+        )
 
     return 0

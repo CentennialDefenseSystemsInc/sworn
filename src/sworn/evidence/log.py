@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from sworn.evidence.signing import compute_key_id
+
 
 @dataclass
 class EvidenceEntry:
@@ -24,6 +26,7 @@ class EvidenceEntry:
     resolution_trace: dict[str, Any] = field(default_factory=dict)
     prev_hash: str = "genesis"
     signature: str = ""
+    key_id: str = ""
 
 
 def _now() -> str:
@@ -34,14 +37,27 @@ def _hash_entry(entry_json: str) -> str:
     return hashlib.sha256(entry_json.encode()).hexdigest()
 
 
-def _canonical_json(entry_dict: dict[str, Any]) -> str:
+def canonical_json(
+    entry_dict: dict[str, Any],
+    *,
+    include_signature_and_key_id: bool = False,
+) -> str:
     """Produce canonical JSON for hashing and signing.
 
-    The signature field is always empty in the canonical form.
+    The signature and key_id fields are always omitted from the canonical form.
     """
     canonical = dict(entry_dict)
-    canonical["signature"] = ""
-    return json.dumps(canonical, separators=(",", ":"), sort_keys=True)
+    if not include_signature_and_key_id:
+        if "signature" in canonical:
+            canonical["signature"] = ""
+        if "key_id" in canonical:
+            canonical["key_id"] = ""
+    return json.dumps(
+        canonical,
+        separators=(",", ":"),
+        sort_keys=True,
+        ensure_ascii=False,
+    )
 
 
 def read_last_hash(log_path: Path) -> str:
@@ -57,9 +73,9 @@ def read_last_hash(log_path: Path) -> str:
                     last_line = line
             if not last_line:
                 return "genesis"
-            # Hash the canonical form (signature stripped)
+            # Hash the canonical form (signature/key_id stripped)
             entry = json.loads(last_line)
-            return _hash_entry(_canonical_json(entry))
+            return _hash_entry(canonical_json(entry))
     except Exception:
         return "genesis"
 
@@ -73,24 +89,31 @@ def append_entry(
     """Append an evidence entry to the JSONL log.
 
     If signing_key is provided, sign the canonical JSON.
-    Hash chain is computed on canonical JSON (signature="").
+    Hash chain is computed on canonical JSON (signature/key_id stripped).
     """
     if hash_chain:
         entry.prev_hash = read_last_hash(log_path)
 
     entry.signature = ""
+    entry.key_id = ""
     entry_dict = asdict(entry)
-    canonical = _canonical_json(entry_dict)
+    canonical = canonical_json(entry_dict)
 
     # Sign if key provided
     if signing_key is not None:
         from sworn.evidence.signing import sign_entry
+
+        key_id = compute_key_id(signing_key.verify_key)
+        entry_dict["key_id"] = key_id
+        canonical = canonical_json(entry_dict)
         entry_dict["signature"] = sign_entry(signing_key, canonical)
     else:
         entry_dict["signature"] = ""
 
-    entry_json = json.dumps(entry_dict, separators=(",", ":"), sort_keys=True)
-
+    entry_json = canonical_json(
+        entry_dict,
+        include_signature_and_key_id=True,
+    )
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a") as f:
         f.write(entry_json + "\n")
@@ -116,11 +139,14 @@ def read_entries(log_path: Path) -> list[dict[str, Any]]:
 def verify_chain(
     log_path: Path,
     verify_key: Any = None,
+    verify_key_dir: Path | None = None,
 ) -> tuple[bool, str]:
     """Verify the hash chain integrity and optional signatures.
 
     Returns (valid, message).
-    If verify_key is provided, also verifies Ed25519 signatures.
+    If verify_key is provided, verifies all signatures against that key.
+    If verify_key_dir is provided, signatures are verified using pub keys
+    resolved from each entry's key_id.
     """
     if not log_path.exists():
         return True, "No evidence log found"
@@ -129,6 +155,8 @@ def verify_chain(
     line_num = 0
     signed_count = 0
     unsigned_count = 0
+    verify_with_key_dir = verify_key_dir is not None
+    cached_keys: dict[str, Any] = {}
 
     with log_path.open("r") as f:
         for line in f:
@@ -143,7 +171,7 @@ def verify_chain(
                 return False, f"Line {line_num}: invalid JSON"
 
             # Verify hash chain on canonical form
-            canonical = _canonical_json(entry)
+            canonical = canonical_json(entry)
             stored_hash = entry.get("prev_hash", "")
             if stored_hash != prev_hash:
                 return False, (
@@ -153,18 +181,48 @@ def verify_chain(
 
             prev_hash = _hash_entry(canonical)
 
-            # Verify signature if verify_key provided
+            # Verify signature if verify key supplied
             sig = entry.get("signature", "")
             if sig:
                 signed_count += 1
-                if verify_key is not None:
+                verify_key_obj = verify_key
+                if verify_with_key_dir:
+                    key_id = entry.get("key_id", "")
+                    if not key_id:
+                        return False, f"Line {line_num}: missing key_id for signed entry"
+                    if key_id not in cached_keys:
+                        if not verify_key_dir.exists():
+                            return (
+                                False,
+                                f"Line {line_num}: verify key directory missing: {verify_key_dir}",
+                            )
+                        if not verify_key_dir.is_dir():
+                            return (
+                                False,
+                                f"Line {line_num}: expected key directory, found file: {verify_key_dir}",
+                            )
+                        pub_path = verify_key_dir / f"{key_id}.pub"
+                        if not pub_path.exists():
+                            return (
+                                False,
+                                f"Line {line_num}: missing signing key {key_id}.pub",
+                            )
+                        try:
+                            from sworn.evidence.signing import load_verify_key
+                            cached_keys[key_id] = load_verify_key(pub_path)
+                        except Exception as exc:
+                            return False, f"Line {line_num}: {exc}"
+                    verify_key_obj = cached_keys[key_id]
+
+                if verify_key_obj is not None:
                     from sworn.evidence.signing import verify_signature
-                    if not verify_signature(verify_key, canonical, sig):
+
+                    if not verify_signature(verify_key_obj, canonical, sig):
                         return False, f"Line {line_num}: signature verification failed"
+
             else:
                 unsigned_count += 1
-                if verify_key is not None and line_num > 0:
-                    # In a signed log, unsigned entries are a break
+                if (verify_key is not None or verify_with_key_dir) and line_num > 0:
                     if signed_count > 0:
                         return False, f"Line {line_num}: missing signature in signed log"
 

@@ -16,6 +16,7 @@ class KernelInput:
     actor: str
     tool: str | None
     repo_root: str
+    gate_blocked: bool = False
     config: dict = field(default_factory=dict)
 
 

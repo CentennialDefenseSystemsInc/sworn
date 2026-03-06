@@ -1,7 +1,11 @@
-"""Ed25519 evidence signing — isolated key material module."""
+"""Ed25519 evidence signing — isolated key material module.
+
+Repo-local signatures prove tamper-evidence within this repository.
+Sworn does not provide a CA or external trust root. Signatures attest to local integrity.
+"""
 from __future__ import annotations
 
-import json
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
@@ -37,9 +41,8 @@ def generate_keypair(key_dir: Path) -> tuple[Path, Path]:
 
     import nacl.signing
 
-    priv_path = key_dir / "signing.key"
+    priv_path = key_dir / "active.key"
     pub_path = key_dir / "signing.pub"
-
     if priv_path.exists():
         raise SigningError(f"Signing key already exists: {priv_path}")
 
@@ -47,6 +50,7 @@ def generate_keypair(key_dir: Path) -> tuple[Path, Path]:
 
     signing_key = nacl.signing.SigningKey.generate()
     verify_key = signing_key.verify_key
+    pub_path = key_dir / f"{compute_key_id(verify_key)}.pub"
 
     priv_path.write_text(signing_key.encode().hex() + "\n")
     os.chmod(priv_path, 0o600)
@@ -54,6 +58,11 @@ def generate_keypair(key_dir: Path) -> tuple[Path, Path]:
     pub_path.write_text(verify_key.encode().hex() + "\n")
 
     return priv_path, pub_path
+
+
+def compute_key_id(verify_key: Any) -> str:
+    """Derive short key identifier from the verify key bytes."""
+    return hashlib.sha256(verify_key.encode()).hexdigest()[:16]
 
 
 def load_signing_key(path: Path) -> Any:

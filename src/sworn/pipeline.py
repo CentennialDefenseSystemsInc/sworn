@@ -65,12 +65,28 @@ def run_pipeline(
     else:
         gate_results["allowlist"] = "SKIP" if not config.allowlist else "SKIP"
 
+    # 4. Signing layout migration guard (fail-closed in signed mode)
+    legacy_key = repo_root / ".sworn" / "signing.key"
+    active_key = repo_root / config.signing_key_path
+    signing_migration_block = False
+    gate_results["signing"] = "SKIP"
+    if config.signing_enabled:
+        if legacy_key.exists() and not active_key.exists():
+            decision = "BLOCKED"
+            reason = (
+                "Legacy signing key layout detected at .sworn/signing.key. "
+                "Migrate to .sworn/keys/active.key before enabling signing."
+            )
+            gate_results["signing"] = "ERROR"
+            signing_migration_block = True
+
     # 4. Kernels — run unconditionally, collect all results
     kernel_input = KernelInput(
         files=files,
         actor=identity.actor,
         tool=identity.tool,
         repo_root=str(repo_root),
+        gate_blocked=decision == "BLOCKED",
         config={
             "security_patterns": config.security_patterns,
             "allowlist": config.allowlist,
@@ -84,6 +100,7 @@ def run_pipeline(
     all_kernels = load_builtin_kernels(config.kernels_enabled)
     custom_dir = repo_root / config.custom_kernel_dir
     all_kernels.extend(load_custom_kernels(custom_dir))
+    all_kernels.sort(key=lambda item: item[0])
 
     dispositions: list[KernelDisposition] = []
 
@@ -117,7 +134,7 @@ def run_pipeline(
         )
 
     # Resolve kernel dispositions (gate BLOCKED always wins separately)
-    trace = resolve(dispositions, config.precedence_rules)
+    trace = resolve(dispositions)
     resolution_trace = asdict(trace)
 
     if decision == "PASS" and trace.final_decision == "BLOCKED":
@@ -131,7 +148,11 @@ def run_pipeline(
     # 5. Load signing key if present (fail-closed)
     signing_key = None
     key_path = repo_root / config.signing_key_path
-    if key_path.exists():
+    if (
+        config.signing_enabled
+        and not signing_migration_block
+        and key_path.exists()
+    ):
         from sworn.evidence.signing import (
             SigningError,
             SigningUnavailableError,
@@ -147,6 +168,11 @@ def run_pipeline(
             decision = "BLOCKED"
             reason = f"Signing key error: {exc}"
             gate_results["signing"] = "ERROR"
+        else:
+            gate_results["signing"] = "PASS"
+    else:
+        if gate_results["signing"] != "ERROR":
+            gate_results["signing"] = "SKIP"
 
     # 6. Evidence (always log, even on block)
     evidence_entry = EvidenceEntry(

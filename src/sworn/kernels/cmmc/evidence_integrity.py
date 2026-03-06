@@ -27,15 +27,24 @@ def evaluate(kernel_input: KernelInput) -> KernelResult:
 
     # Verify hash chain
     verify_key = None
-    pub_path = repo_root / config.get("signing_pub_path", ".sworn/signing.pub")
+    verify_key_dir = None
+    pub_path = repo_root / config.get("signing_pub_path", ".sworn/keys/")
     if pub_path.exists():
         try:
-            from sworn.evidence.signing import load_verify_key
-            verify_key = load_verify_key(pub_path)
+            if pub_path.is_dir():
+                verify_key_dir = pub_path
+            else:
+                from sworn.evidence.signing import load_verify_key
+                verify_key = load_verify_key(pub_path)
         except Exception as exc:
             evidence.append(f"Could not load verify key: {exc}")
 
-    valid, msg = verify_chain(log_path, verify_key=verify_key)
+    if verify_key is not None:
+        valid, msg = verify_chain(log_path, verify_key=verify_key)
+    elif verify_key_dir is not None:
+        valid, msg = verify_chain(log_path, verify_key_dir=verify_key_dir)
+    else:
+        valid, msg = verify_chain(log_path)
 
     if not valid:
         evidence.append(f"Evidence chain BROKEN: {msg}")

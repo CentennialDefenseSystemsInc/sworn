@@ -74,16 +74,9 @@ hash_chain = true
 
 # [signing]
 # Ed25519 evidence signing. Generate keys with: sworn keygen
-# key_path = ".sworn/signing.key"
-# pub_path = ".sworn/signing.pub"
-
-# [resolution]
-# Precedence rules for kernel conflict resolution.
-# Each rule: if when_pass kernel passed AND overrides_block kernel blocked,
-# the block is removed. Overrides can only REMOVE blocks, never ADD.
-# [[resolution.precedence]]
-# when_pass = "kernel_a"
-# overrides_block = "kernel_b"
+# enabled = false
+# key_path = ".sworn/keys/active.key"
+# pub_path = ".sworn/keys/"
 """
 
 
@@ -98,9 +91,9 @@ class SwornConfig:
     custom_kernel_dir: str = ".sworn/kernels"
     evidence_log_path: str = ".sworn/evidence.jsonl"
     evidence_hash_chain: bool = True
-    signing_key_path: str = ".sworn/signing.key"
-    signing_pub_path: str = ".sworn/signing.pub"
-    precedence_rules: list[dict[str, str]] = field(default_factory=list)
+    signing_key_path: str = ".sworn/keys/active.key"
+    signing_pub_path: str = ".sworn/keys/"
+    signing_enabled: bool = False
 
 
 def _compile_patterns(raw: list[str]) -> list[re.Pattern[str]]:
@@ -146,6 +139,7 @@ def _defaults() -> SwornConfig:
         custom_kernel_dir=".sworn/kernels",
         evidence_log_path=".sworn/evidence.jsonl",
         evidence_hash_chain=True,
+        signing_enabled=False,
     )
 
 
@@ -185,25 +179,11 @@ def _parse(raw: dict[str, Any]) -> SwornConfig:
     evidence = raw.get("evidence", {})
 
     signing = raw.get("signing", {})
-    signing_key_path = signing.get("key_path", ".sworn/signing.key")
-    signing_pub_path = signing.get("pub_path", ".sworn/signing.pub")
-
-    resolution = raw.get("resolution", {})
-    precedence_raw = resolution.get("precedence", [])
-    if not isinstance(precedence_raw, list):
-        raise ValueError("resolution.precedence must be a list of tables")
-    precedence_rules: list[dict[str, str]] = []
-    for rule in precedence_raw:
-        if not isinstance(rule, dict):
-            raise ValueError("Each precedence rule must be a table")
-        if "when_pass" not in rule or "overrides_block" not in rule:
-            raise ValueError(
-                "Each precedence rule requires 'when_pass' and 'overrides_block'"
-            )
-        precedence_rules.append({
-            "when_pass": str(rule["when_pass"]),
-            "overrides_block": str(rule["overrides_block"]),
-        })
+    signing_key_path = signing.get("key_path", ".sworn/keys/active.key")
+    signing_pub_path = signing.get("pub_path", ".sworn/keys/")
+    signing_enabled = signing.get("enabled", False)
+    if not isinstance(signing_enabled, bool):
+        raise ValueError("signing.enabled must be true/false")
 
     return SwornConfig(
         security_patterns=_compile_patterns(patterns_raw),
@@ -215,5 +195,5 @@ def _parse(raw: dict[str, Any]) -> SwornConfig:
         evidence_hash_chain=evidence.get("hash_chain", True),
         signing_key_path=signing_key_path,
         signing_pub_path=signing_pub_path,
-        precedence_rules=precedence_rules,
+        signing_enabled=signing_enabled,
     )

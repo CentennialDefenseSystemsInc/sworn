@@ -12,6 +12,7 @@ def evaluate(kernel_input: KernelInput) -> KernelResult:
     """
     evidence: list[str] = [
         "Governance pipeline executing",
+        "Control supported by pipeline execution evidence (indirect)",
         f"Actor: {kernel_input.actor}",
         f"Files under governance: {len(kernel_input.files)}",
     ]

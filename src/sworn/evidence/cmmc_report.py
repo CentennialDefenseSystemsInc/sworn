@@ -1,4 +1,4 @@
-"""CMMC compliance report generator — assessor-ready output."""
+"""CMMC evidence support report generator."""
 from __future__ import annotations
 
 import json
@@ -42,7 +42,9 @@ def _assess_control(
 
     return {
         "control_id": control_id,
-        "status": "MET" if met else "NOT_MET",
+        "status": "SUPPORTED (indirect)"
+        if met and control_id == "SI.L2-3.14.1"
+        else ("SUPPORTED" if met else "NOT_SUPPORTED"),
         "evidence_count": evidence_count,
         "last_verified": last_verified,
     }
@@ -71,7 +73,7 @@ def generate_cmmc_report(
         assessment = _assess_control(control_id, entries)
         controls.append(assessment)
 
-    met_count = sum(1 for c in controls if c["status"] == "MET")
+    met_count = sum(1 for c in controls if c["status"].startswith("SUPPORTED"))
     total = len(controls)
 
     report_data = {
@@ -98,7 +100,9 @@ def _format_text(data: dict[str, Any]) -> str:
     """Format report as human-readable text."""
     lines: list[str] = []
     lines.append("=" * 60)
-    lines.append("CMMC Level 2 — Compliance Assessment Report")
+    lines.append("CMMC Level 2 — Evidence Support Report")
+    lines.append("This report summarizes governance evidence that may support assessment. "
+                 "It does not certify compliance.")
     lines.append("=" * 60)
     lines.append("")
 
@@ -107,7 +111,7 @@ def _format_text(data: dict[str, Any]) -> str:
     lines.append("")
 
     # Control assessment table
-    lines.append(f"{'Control':<16} {'Status':<10} {'Evidence':<10} {'Last Verified'}")
+    lines.append(f"{'Control':<16} {'Status':<20} {'Evidence':<10} {'Last Verified'}")
     lines.append("-" * 60)
 
     for ctrl in data["controls"]:
