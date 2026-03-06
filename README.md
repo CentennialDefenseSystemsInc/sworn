@@ -283,13 +283,14 @@ It does not certify compliance, replace a C3PAO, or guarantee assessment outcome
 
 Before tagging any release:
 
-- Clean reproducible install (`pip install sworncode[signing]` in a clean environment)
+- Clean reproducible install (`python -m pip install .[dev,signing]` in a clean environment on Python 3.10-3.13)
 - Full pytest suite green
 - Signing-enabled tamper detection validated
 - CI base-resolution failure path validated
 - Legacy key migration path validated
 - Version bump consistent across package metadata and documentation
-- Working tree clean
+- Release evidence generated and reviewed before signed tag capture
+- Working tree clean during final tag capture
 
 ## Known Residual Risks
 

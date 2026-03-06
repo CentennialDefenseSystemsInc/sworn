@@ -108,11 +108,12 @@ Definition guidance:
    - No staged or unstaged local changes are allowed during final tag capture.
 2. Reproducible install proof
    - Validate fresh install in a clean Python environment:
+     - Use an explicitly selected supported interpreter (`python3.10`-`python3.13`).
      - `python -m venv .venv-release`
      - `source .venv-release/bin/activate`
-     - `python -m pip install --upgrade pip`
-     - `python -m pip install .[signing]`
-     - `python -m pytest -q`
+     - `python -m pip install --upgrade pip build twine`
+     - `python -m pip install .[dev,signing]`
+     - `python -m pytest tests -q --tb=short`
    - Confirm CLI and module entrypoint are available:
      - `sworn --version`
      - `python -m sworn --help`
@@ -129,6 +130,24 @@ Definition guidance:
    - Drift from docs to implementation is reviewed and closed.
 
 Failure of any item blocks tagging.
+
+## Release Phases
+
+Sworn release flow is intentionally split:
+
+### Phase 0 — Evidence generation
+
+- Run `./scripts/release_phase0_readiness.sh --version <version>` from a clean tree.
+- Review generated `release-evidence/<version>/`.
+- Commit release evidence and any release-contract updates before tag capture.
+
+### Phase 1 — Tag and publish
+
+- Start from the committed Phase-0 state with a clean working tree.
+- Create the signed tag for the exact commit that already contains release evidence.
+- Publish the package and attach or reference the release evidence bundle.
+
+Combining evidence generation and tag capture in one dirty working tree is prohibited.
 
 ## Release Readiness Checklist
 
@@ -157,7 +176,7 @@ Capture at minimum:
 - Pytest output:
   - `PYTHONPATH=src python3 -m pytest tests -q --tb=short | tee release-evidence/<tag>/pytest-full.log`
 - Governance outputs:
-  - `python3 ~/.codex/scripts/validate_governance.py --strict | tee release-evidence/<tag>/validate_governance.log`
+  - `python3 ~/.codex/scripts/validate_governance.py --root . --strict | tee release-evidence/<tag>/validate_governance.log`
   - `bash ~/.codex/scripts/bootstrap_codex_governance.sh --repo-root . --check-only | tee release-evidence/<tag>/bootstrap_gov.log`
   - `bash ~/.codex/scripts/run_full_verification.sh | tee release-evidence/<tag>/full_verification.log`
 - Environment fingerprint:
@@ -165,15 +184,16 @@ Capture at minimum:
   - `uname -a | tee release-evidence/<tag>/env-uname.txt`
   - `pip freeze | sort | tee release-evidence/<tag>/pip-freeze.txt`
 - Reproducible install record:
-  - `python -m pip install .[signing]` log in `release-evidence/<tag>/install.log`
+  - `python -m pip install .[dev,signing]` log in `release-evidence/<tag>/install.log`
+  - `sworn --version | tee release-evidence/<tag>/sworn-cli.log`
+  - `python -m sworn --help | tee release-evidence/<tag>/sworn-module-help.txt`
 - VCS context:
   - `git rev-parse HEAD | tee release-evidence/<tag>/release-sha.txt`
-  - `git status --short | tee release-evidence/<tag>/working-tree-before-tag.txt`
+  - `git status --short | tee release-evidence/<tag>/working-tree-at-start.txt`
 - Release identity:
-  - `git tag -s <tag> -m ...` output captured in `release-evidence/<tag>/tag-log.txt`
-  - Signed tag reference stored in release notes
+  - Signed tag reference stored in release notes or external operator log after Phase 0 evidence is committed
 - Artifact integrity:
-  - Build artifacts with `python -m build` and store `sha256sum` manifest at `release-evidence/<tag>/dist-shas.txt`
+  - Build artifacts with `python -m build --no-isolation` and store `sha256` manifest at `release-evidence/<tag>/dist-shas.txt`
 
 Absence of these artifacts is an incomplete release and blocks final sign-off.
 
@@ -192,6 +212,7 @@ Evidence artifacts must be:
 - Stored in a non-ephemeral location.
 - Associated with the exact signed release tag.
 - Recorded with integrity hashes.
+- Committed before tag capture when the in-repo retention model is used.
 
 Modifying artifacts after tag publication invalidates the release record and requires
 corrective re-release.
