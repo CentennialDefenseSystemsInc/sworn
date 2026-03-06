@@ -7,10 +7,12 @@ from pathlib import Path
 from sworn.evidence.log import (
     EvidenceEntry,
     append_entry,
+    canonical_json,
     read_entries,
     read_last_hash,
     verify_chain,
 )
+from sworn.evidence.signing import verify_signature
 
 
 class TestEvidenceLog:
@@ -222,3 +224,61 @@ class TestEvidenceLog:
         valid, msg = verify_chain(log, verify_key=vk)
         assert not valid
         assert "missing signature" in msg.lower()
+
+    def test_threat_canonical_deterministic_across_key_order(self):
+        data_a = {
+            "decision": "PASS",
+            "actor": "alice",
+            "signature": "x",
+            "key_id": "key",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "files": ["a.py"],
+        }
+        data_b = {
+            "files": ["a.py"],
+            "timestamp": "2026-01-01T00:00:00Z",
+            "actor": "alice",
+            "decision": "PASS",
+            "key_id": "key",
+            "signature": "y",
+        }
+        assert canonical_json(data_a) == canonical_json(data_b)
+
+    def test_threat_canonical_matches_between_hash_and_sign(
+        self, tmp_path: Path, signing_keypair
+    ):
+        sk, vk, _ = signing_keypair
+        log = tmp_path / "evidence.jsonl"
+        entry = EvidenceEntry(
+            timestamp="2026-01-01T00:00:00Z",
+            actor="test",
+            tool=None,
+            files=["a.py"],
+            gates={"identity": "PASS"},
+            kernels=[],
+            decision="PASS",
+        )
+        append_entry(log, entry, hash_chain=False, signing_key=sk)
+
+        written = json.loads(log.read_text().splitlines()[0])
+        canonical = canonical_json(written)
+        assert verify_signature(vk, canonical, written["signature"])
+
+    def test_threat_signature_survives_dict_reorder(self):
+        data = {
+            "decision": "PASS",
+            "actor": "ci",
+            "files": ["a.py"],
+            "signature": "abc",
+            "key_id": "def",
+            "timestamp": "2026-01-01T00:00:00Z",
+        }
+        reordered = {
+            "key_id": "def",
+            "signature": "abc",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "files": ["a.py"],
+            "actor": "ci",
+            "decision": "PASS",
+        }
+        assert canonical_json(data) == canonical_json(reordered)

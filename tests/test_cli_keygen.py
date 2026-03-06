@@ -1,6 +1,7 @@
 """Tests for sworn keygen CLI command."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from sworn.cli import cmd_keygen, cmd_init
@@ -11,8 +12,10 @@ class TestKeygen:
         cmd_init(tmp_repo)
         result = cmd_keygen(tmp_repo)
         assert result == 0
-        assert (tmp_repo / ".sworn" / "signing.key").exists()
-        assert (tmp_repo / ".sworn" / "signing.pub").exists()
+        key_dir = tmp_repo / ".sworn" / "keys"
+        assert (key_dir / "active.key").exists()
+        pub_files = list(key_dir.glob("*.pub"))
+        assert len(pub_files) == 1
 
     def test_keygen_refuses_overwrite(self, tmp_repo: Path):
         cmd_init(tmp_repo)
@@ -29,4 +32,4 @@ class TestKeygen:
         # No .gitignore in tmp_repo
         cmd_keygen(tmp_repo)
         captured = capsys.readouterr()
-        assert "WARNING" in captured.out or "gitignore" in captured.out.lower()
+        assert re.search(r"active.key", captured.out, re.IGNORECASE)

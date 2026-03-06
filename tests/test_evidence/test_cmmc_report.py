@@ -66,6 +66,7 @@ class TestCMMCReport:
         assert "AC.L2-3.1.1" in report
         assert "SC.L2-3.13.1" in report
         assert "CMMC Level 2" in report
+        assert "Evidence Support Report" in report
 
     def test_json_structure(self, tmp_path: Path):
         log_path = tmp_path / ".sworn" / "evidence.jsonl"
@@ -89,9 +90,9 @@ class TestCMMCReport:
         _write_cmmc_log(log_path)
         report = generate_cmmc_report(log_path, _config(), "json")
         data = json.loads(report)
-        met_controls = [c for c in data["controls"] if c["status"] == "MET"]
-        # AC.L2-3.1.1, AC.L2-3.1.2, AU.L2-3.3.1, SI.L2-3.14.1 should be MET
-        assert len(met_controls) >= 3
+        supported_controls = [c for c in data["controls"] if c["status"].startswith("SUPPORTED")]
+        # AC.L2-3.1.1, AC.L2-3.1.2, AU.L2-3.3.1, SI.L2-3.14.1 should be supported
+        assert len(supported_controls) >= 3
 
     def test_chain_integrity_reflected(self, tmp_path: Path):
         log_path = tmp_path / ".sworn" / "evidence.jsonl"
@@ -107,3 +108,10 @@ class TestCMMCReport:
         data = json.loads(report)
         ac_control = next(c for c in data["controls"] if c["control_id"] == "AC.L2-3.1.1")
         assert ac_control["evidence_count"] >= 1
+
+    def test_threat_cmmc_report_no_compliance_claim(self, tmp_path: Path):
+        log_path = tmp_path / ".sworn" / "evidence.jsonl"
+        _write_cmmc_log(log_path)
+        report = generate_cmmc_report(log_path, _config(), "text")
+        assert "may support assessment" in report.lower()
+        assert "compliance" not in report.split("\n")[0].lower()

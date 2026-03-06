@@ -75,3 +75,21 @@ class TestPipeline:
         config = _config()
         result = run_pipeline(tmp_repo, [], config)
         assert result.decision == "PASS"
+
+    def test_threat_kernel_order_deterministic(self, tmp_repo: Path):
+        config = _config()
+        result = run_pipeline(tmp_repo, ["src/main.py"], config)
+        names = [entry["name"] for entry in result.kernel_results]
+        assert names == sorted(names)
+
+    def test_threat_legacy_key_layout_blocks_signed_mode(self, tmp_repo: Path):
+        legacy_key = tmp_repo / ".sworn" / "signing.key"
+        legacy_key.parent.mkdir(exist_ok=True, parents=True)
+        legacy_key.write_text("dummy")
+
+        config = _config()
+        config.signing_enabled = True
+        result = run_pipeline(tmp_repo, ["src/main.py"], config)
+        assert result.decision == "BLOCKED"
+        assert result.gate_results.get("signing") == "ERROR"
+        assert "Legacy signing key layout" in result.reason

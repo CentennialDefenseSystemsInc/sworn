@@ -27,3 +27,8 @@ class TestSIFlaw:
         inp = KernelInput(files=["a.py"], actor="test", tool=None, repo_root="/tmp")
         result = evaluate(inp)
         assert result.decision == "PASS"
+
+    def test_threat_si_kernel_clearly_labeled_indirect(self):
+        inp = KernelInput(files=["a.py"], actor="test", tool=None, repo_root="/tmp")
+        result = evaluate(inp)
+        assert any("indirect" in e.lower() for e in result.evidence_summary)
