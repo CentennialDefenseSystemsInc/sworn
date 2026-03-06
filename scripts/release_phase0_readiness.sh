@@ -39,6 +39,8 @@ RUNNER_BIN="${SWORN_RELEASE_PYTHON:-}"
 VERSION="${SWORN_VERSION_OVERRIDE:-}"
 VENV_PY=""
 VENV_SWORN=""
+START_SHA=""
+START_STATUS=""
 
 resolve_runner() {
   if [[ -z "$RUNNER_BIN" ]]; then
@@ -140,6 +142,9 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
+START_SHA="$(git rev-parse HEAD)"
+START_STATUS="$(git status --short)"
+
 if [[ ! -f "$HOME/.codex/scripts/validate_governance.py" ]]; then
   echo "FAIL: governance validation script missing | phase0 | $HOME/.codex/scripts/validate_governance.py"
   exit 1
@@ -177,8 +182,8 @@ $RUNNER_BIN -m venv "$RUNNER_VENV"
 VENV_PY="$RUNNER_VENV/bin/python"
 VENV_SWORN="$RUNNER_VENV/bin/sworn"
 
-git rev-parse HEAD | tee "$RELEASE_DIR/release-sha.txt"
-git status --short | tee "$RELEASE_DIR/working-tree-at-start.txt"
+printf '%s\n' "$START_SHA" | tee "$RELEASE_DIR/release-sha.txt"
+printf '%s\n' "$START_STATUS" | tee "$RELEASE_DIR/working-tree-at-start.txt"
 
 run_step "bootstrap env" "$VENV_PY -m pip install --upgrade pip setuptools wheel build twine" "$RELEASE_DIR/pip-bootstrap.log"
 run_step "repro install" "$VENV_PY -m pip install .[dev,signing]" "$RELEASE_DIR/install.log"
@@ -201,10 +206,15 @@ $VENV_PY -m build --no-isolation
 shasum -a 256 dist/* | sort | tee "$RELEASE_DIR/dist-shas.txt"
 run_step "twine check" "$VENV_PY -m twine check dist/*" "$RELEASE_DIR/twine-check.log"
 
-tar -czf "$RELEASE_DIR/evidence-package.tar.gz" \
+TMP_EVIDENCE_PACKAGE="$(mktemp /tmp/sworn-evidence-package.XXXXXX)"
+rm -f "$TMP_EVIDENCE_PACKAGE"
+TMP_EVIDENCE_PACKAGE="${TMP_EVIDENCE_PACKAGE}.tar.gz"
+
+tar -czf "$TMP_EVIDENCE_PACKAGE" \
   -C "$ROOT_DIR" \
   "release-evidence/$VERSION" \
   pyproject.toml src/sworn/__init__.py SECURITY.md COMPLIANCE_SCOPE.md RELEASE_PROCESS.md GOVERNANCE_OVERVIEW.md README.md
+mv "$TMP_EVIDENCE_PACKAGE" "$RELEASE_DIR/evidence-package.tar.gz"
 shasum -a 256 "$RELEASE_DIR/evidence-package.tar.gz" | tee "$RELEASE_DIR/evidence-package.sha256"
 
 cat > "$RELEASE_DIR/MANIFEST.md" <<EOF
