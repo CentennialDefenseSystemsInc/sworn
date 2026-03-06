@@ -111,7 +111,7 @@ Definition guidance:
      - Use an explicitly selected supported interpreter (`python3.10`-`python3.13`).
      - `python -m venv .venv-release`
      - `source .venv-release/bin/activate`
-     - `python -m pip install --upgrade pip build twine`
+     - `python -m pip install --upgrade pip setuptools wheel build twine`
      - `python -m pip install .[dev,signing]`
      - `python -m pytest tests -q --tb=short`
    - Confirm CLI and module entrypoint are available:

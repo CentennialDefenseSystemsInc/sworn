@@ -180,7 +180,7 @@ VENV_SWORN="$RUNNER_VENV/bin/sworn"
 git rev-parse HEAD | tee "$RELEASE_DIR/release-sha.txt"
 git status --short | tee "$RELEASE_DIR/working-tree-at-start.txt"
 
-run_step "bootstrap env" "$VENV_PY -m pip install --upgrade pip build twine" "$RELEASE_DIR/pip-bootstrap.log"
+run_step "bootstrap env" "$VENV_PY -m pip install --upgrade pip setuptools wheel build twine" "$RELEASE_DIR/pip-bootstrap.log"
 run_step "repro install" "$VENV_PY -m pip install .[dev,signing]" "$RELEASE_DIR/install.log"
 run_step "cli sanity" "$VENV_SWORN --version" "$RELEASE_DIR/sworn-cli.log"
 run_step "module help" "$VENV_PY -m sworn --help" "$RELEASE_DIR/sworn-module-help.txt"
