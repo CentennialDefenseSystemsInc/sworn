@@ -23,4 +23,5 @@ runs:
     - shell: bash
       env:
         SWORN_CI: "1"
+        SWORN_BASE_SHA: ${{ github.event.pull_request.base.sha }}
       run: sworn ci-check
